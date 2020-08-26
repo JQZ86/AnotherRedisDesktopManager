@@ -113,6 +113,7 @@ export default {
       }
     },
     initScanStreamsAndScan() {
+      // console.log('-=-=-=', this.client.nodes('master'));
       // this.client.nodes: cluster
       let nodes = this.client.nodes ? this.client.nodes('master') : [this.client];
       this.scanEndCount = nodes.length;

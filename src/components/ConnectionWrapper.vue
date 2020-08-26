@@ -50,12 +50,12 @@ export default {
   },
   methods: {
     initShow() {
-      this.$refs.operateItem.initShow();
-      this.$refs.keyList.initShow();
+      // this.$refs.operateItem.initShow();
+      // this.$refs.keyList.initShow();
     },
     openConnection(callback = false) {
       const client = this.getRedisClient(this.config);
-
+return;
       // ssh tunnel promise client
       if (typeof client.then === 'function') {
         client.then((realClient) => {
@@ -71,12 +71,22 @@ export default {
     afterOpenConnection(client, callback = false) {
       // new connection, not ready
       if (client.status != 'ready') {
+
+        // let nodes = client.nodes('master');
+        // console.log('all nodes111', nodes);
+
+      // setTimeout(() => {
+      //   let nodes = client.nodes('master');
+      //   console.log('all nodes222', nodes);
+      // }, 1000);
+
+
         client.on('ready', () => {
           // open status tab
-          this.$bus.$emit('openStatus', client, this.config.connectionName);
+          // this.$bus.$emit('openStatus', client, this.config.connectionName);
 
-          this.initShow();
-          callback && callback();
+          // this.initShow();
+          // callback && callback();
         });
       }
 
@@ -114,18 +124,18 @@ export default {
         let sshPromise = redisClient.createSSHConnection(
           config.sshOptions, config.host, config.port, config.auth, config);
 
-        sshPromise.then((client) => {
-          client.on('error', (err) => {
-            this.$message.error({
-              message: 'SSH Redis Client On Error: ' + err,
-              duration: 2500,
-            });
+        // sshPromise.then((client) => {
+        //   client.on('error', (err) => {
+        //     this.$message.error({
+        //       message: 'SSH Redis Client On Error: ' + err,
+        //       duration: 2500,
+        //     });
 
-            this.$bus.$emit('closeConnection');
-          });
+        //     this.$bus.$emit('closeConnection');
+        //   });
 
-          this.client = client;
-        });
+        //   this.client = client;
+        // });
 
         return sshPromise;
       }
