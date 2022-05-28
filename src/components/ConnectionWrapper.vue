@@ -11,12 +11,14 @@
         slot="title"
         :config="config"
         :client='client'
-        @refreshConnection='openConnection()'>
+        @changeColor='setColor'
+        @refreshConnection='openConnection(false, true)'>
       </ConnectionMenu>
 
       <!-- db search operate -->
       <OperateItem
         ref='operateItem'
+        :config="config"
         :client='client'>
       </OperateItem>
 
@@ -24,6 +26,7 @@
       <KeyList
         ref='keyList'
         :config="config"
+        :globalSettings='globalSettings'
         :client='client'>
       </KeyList>
     </el-submenu>
@@ -40,9 +43,12 @@ export default {
   data() {
     return {
       client: null,
+      pingTimer: null,
+      pingInterval: 10000, // ms
+      lastSelectedDb: 0,
     };
   },
-  props: ['config'],
+  props: ['config', 'globalSettings'],
   components: {ConnectionMenu, OperateItem, KeyList},
   created() {
     this.$bus.$on('closeConnection', (connectionName = false) => {
@@ -54,13 +60,25 @@ export default {
       this.$refs.operateItem.initShow();
       this.$refs.keyList.initShow();
     },
-    openConnection(callback = false) {
-      // search input loading status
-      this.$refs.operateItem.searchIcon = 'el-icon-loading';
+    initLastSelectedDb() {
+      let db = parseInt(localStorage.getItem('lastSelectedDb_' + this.config.connectionName));
 
-      if (this.client) {
-        return this.afterOpenConnection(this.client, callback);
+      if (db > 0 && this.lastSelectedDb != db) {
+        this.lastSelectedDb = db;
+        this.$refs.operateItem && this.$refs.operateItem.setDb(db);
       }
+    },
+    openConnection(callback = false, forceOpen = false) {
+      // recovery last selected db
+      this.initLastSelectedDb();
+
+      // opened, do nothing
+      if (this.client) {
+        return forceOpen ? this.afterOpenConnection(this.client, callback) : false;
+      }
+
+      // set searching status first
+      this.$refs.operateItem.searchIcon = 'el-icon-loading';
 
       // create a new client
       const clientPromise = this.getRedisClient(this.config);
@@ -73,8 +91,14 @@ export default {
       // new connection, not ready
       if (client.status != 'ready') {
         client.on('ready', () => {
+          if (client.readyInited) {
+            return;
+          }
+
+          client.readyInited = true;
           // open status tab
           this.$bus.$emit('openStatus', client, this.config.connectionName);
+          this.startPingInterval();
 
           this.initShow();
           callback && callback();
@@ -97,6 +121,9 @@ export default {
       this.$refs.connectionMenu.close(this.config.connectionName);
       this.$bus.$emit('removeAllTab', connectionName);
 
+      // clear ping interval
+      clearInterval(this.pingTimer);
+
       // reset operateItem items
       this.$refs.operateItem && this.$refs.operateItem.resetStatus();
       // reset keyList items
@@ -104,17 +131,30 @@ export default {
 
       this.client && this.client.quit && this.client.quit();
       this.client = null;
+
+    },
+    startPingInterval() {
+      this.pingTimer = setInterval(() => {
+        this.client && this.client.ping().then(reply => {}).catch(e => {
+          // this.$message.error('Ping Error: ' + e.message);
+        });
+      }, this.pingInterval);
     },
     getRedisClient(config) {
+      // prevent changing back to raw config, such as config.db
+      const configCopy = JSON.parse(JSON.stringify(config));
+      // select db
+      configCopy.db = this.lastSelectedDb;
+
       // ssh client
-      if (config.sshOptions) {
+      if (configCopy.sshOptions) {
         var clientPromise = redisClient.createSSHConnection(
-          config.sshOptions, config.host, config.port, config.auth, config);
+          configCopy.sshOptions, configCopy.host, configCopy.port, configCopy.auth, configCopy);
       }
       // normal client
       else {
         var clientPromise = redisClient.createConnection(
-          config.host, config.port, config.auth, config);
+          configCopy.host, configCopy.port, configCopy.auth, configCopy);
       }
 
       clientPromise.then((client) => {
@@ -124,6 +164,7 @@ export default {
           this.$message.error({
             message: 'Redis Client On Error: ' + error + ' Config right?',
             duration: 3000,
+            customClass: 'redis-on-error-message'
           });
 
           this.$bus.$emit('closeConnection');
@@ -135,14 +176,47 @@ export default {
 
       return clientPromise;
     },
+    setColor(color, save = true) {
+      const ulDom = this.$refs.connectionMenu.$el;
+      const className = 'menu-with-custom-color';
+
+      // save to setting
+      save && this.$storage.editConnectionItem(this.config, {color: color});
+
+      if (!color) {
+        ulDom.classList.remove(className);
+      }
+      else {
+        ulDom.classList.add(className);
+        this.$el.style.setProperty("--menu-color", color);
+      }
+    },
+  },
+  mounted() {
+    this.setColor(this.config.color, false);
+  },
+  beforeDestroy() {
+    this.closeConnection(this.config.connectionName);
   },
 }
 </script>
 
 <style type="text/css">
+  /*menu ul*/
   .connection-menu {
-    margin-top: 10px;
+    margin-top: 9px;
     padding-right: 6px;
     border-right: 0;
+  }
+
+  .connection-menu.menu-with-custom-color li.el-submenu {
+    border-left: 5px solid var(--menu-color);
+    border-radius: 4px 0 0 4px;
+    padding-left: 3px;
+  }
+
+  /*this error shows first*/
+  .redis-on-error-message {
+    z-index:9999 !important;
   }
 </style>

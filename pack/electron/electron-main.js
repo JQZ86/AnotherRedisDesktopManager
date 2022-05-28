@@ -1,18 +1,37 @@
 // Modules to control application life and create native browser window
-const { app, BrowserWindow, Menu } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog } = require('electron');
 const fontManager = require('./font-manager');
 const winState = require('./win-state');
 
 
 global.APP_ENV = (process.env.NODE_ENV === 'dev') ? 'dev' : 'production';
 
-if (APP_ENV === 'production') {
-  require('./update')();
-}
 
 // Keep a global reference of the window object, if you don't, the window will
 // be closed automatically when the JavaScript object is garbage collected.
 let mainWindow;
+
+// handle uncaught exception
+process.on('uncaughtException', (err, origin) => {
+  if (!err) {
+    return;
+  }
+
+  dialog.showMessageBoxSync(mainWindow, {
+    type: 'error',
+    title: 'Whoops! Uncaught Exception', 
+    message: err.stack,
+    detail: '\nDon\'t worry, I will fix it! 😎😎\n\n'
+            + 'Submit issue to: \nhttps://github.com/qishibo/AnotherRedisDesktopManager/'
+  });
+
+  process.exit();
+});
+
+// auto update
+if (APP_ENV === 'production') {
+  require('./update')();
+}
 
 function createWindow() {
   // get last win stage
@@ -28,8 +47,15 @@ function createWindow() {
     autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: true,
+      // add this to keep 'remote' module avaiable. Tips: it will be removed in electron 14
+      enableRemoteModule: true,
+      contextIsolation: false,
     },
   });
+
+  if (lastWinStage.maximized) {
+    mainWindow.maximize();
+  }
 
   winState.watchClose(mainWindow);
 
@@ -43,6 +69,10 @@ function createWindow() {
 
   // Open the DevTools.
   // mainWindow.webContents.openDevTools();
+
+  mainWindow.on('close', () => {
+    mainWindow.webContents.send('closingWindow');
+  });
 
   // Emitted when the window is closed.
   mainWindow.on('closed', () => {
@@ -77,6 +107,21 @@ app.on('activate', () => {
   // dock icon is clicked and there are no other windows open.
   if (mainWindow === null) {
     createWindow();
+  }
+});
+
+// hide window
+ipcMain.on('hideWindow',function() {
+  mainWindow && mainWindow.hide();
+});
+// minimize window
+ipcMain.on('minimizeWindow',function() {
+  mainWindow && mainWindow.minimize();
+});
+// toggle maximize
+ipcMain.on('toggleMaximize',function() {
+  if (mainWindow) {
+    mainWindow.isMaximized() ? mainWindow.restore() : mainWindow.maximize();
   }
 });
 

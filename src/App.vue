@@ -1,5 +1,5 @@
 <template>
-  <el-container class="wrap-container">
+  <el-container class="wrap-container" spellcheck="false">
     <!-- left aside draggable container -->
     <div class="aside-drag-container" :style="{width: sideWidth + 'px'}">
       <!-- connections -->
@@ -14,35 +14,27 @@
     </div>
 
     <!-- right main container -->
-    <el-container style="width: 10%;">
-      <!-- top setting header -->
-      <el-header class="main-header">
-        <Header></Header>
-      </el-header>
-
+    <el-container class='right-main-container'>
       <!-- tab container -->
-      <el-main>
+      <el-main class='main-tabs-container'>
         <Tabs></Tabs>
       </el-main>
     </el-container>
 
-    <ScrollToTop dom=".el-main"></ScrollToTop>
     <UpdateCheck></UpdateCheck>
   </el-container>
 </template>
 
 <script>
-import Header from '@/Header';
 import Aside from '@/Aside';
 import Tabs from '@/components/Tabs';
-import ScrollToTop from '@/components/ScrollToTop';
 import UpdateCheck from '@/components/UpdateCheck';
 
 export default {
   name: 'App',
   data() {
     return {
-      sideWidth: 250,
+      sideWidth: 265,
     };
   },
   created() {
@@ -53,7 +45,7 @@ export default {
     // restore side bar width
     this.restoreSideBarWidth();
   },
-  components: {Header, Aside, Tabs, ScrollToTop, UpdateCheck},
+  components: {Aside, Tabs, UpdateCheck},
   methods: {
     bindSideBarDrag() {
       const that = this;
@@ -62,9 +54,9 @@ export default {
       function mousemove(e)
       {
         const mouseX = e.x;
-        const dragSideWidth = mouseX - 19;
+        const dragSideWidth = mouseX - 17;
 
-        if ((dragSideWidth > 200) && (dragSideWidth < 500)) {
+        if ((dragSideWidth > 200) && (dragSideWidth < 1500)) {
           that.sideWidth = dragSideWidth;
         }
       }
@@ -106,19 +98,10 @@ export default {
       this.initZoom();
     },
     initFont() {
-      let fontFamily = this.$storage.getSetting('fontFamily');
-
-      // set to default font-family
-      if (
-        !fontFamily || !fontFamily.length ||
-        fontFamily.toString() === 'Default Initial'
-      ) {
-        fontFamily = ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Helvetica',
-        'Arial', 'sans-serif','Microsoft YaHei', 'Apple Color Emoji', 'Segoe UI Emoji'];
-      }
-
-      document.body.style.fontFamily =
-        fontFamily.map((line) => {return `"${line}"`}).join(',');
+      const fontFamily = this.$storage.getFontFamily();
+      document.body.style.fontFamily = fontFamily;
+      // tell monaco editor
+      this.$bus.$emit('fontInited', fontFamily);
     },
     initZoom() {
       let zoomFactor = this.$storage.getSetting('zoomFactor');
@@ -198,38 +181,41 @@ button, input, textarea, .vjs__tree {
 .aside-drag-container {
   position: relative;
   user-select: none;
-  max-width: 50%;
+  /*max-width: 50%;*/
 }
 .aside-connection {
   height: 100%;
   width: 100% !important;
   border-right: 1px solid #e4e0e0;
+  overflow: hidden;
 }
-.main-header.el-header {
-  height: 42px !important;
+/*fix right container imdraggable*/
+.right-main-container {
+  width: 10%;
 }
-.height100 {
-  height: 100%;
-}
-.cursor-pointer {
-  cursor: pointer;
+.right-main-container .main-tabs-container {
+  overflow-y: hidden;
+  padding-top: 0px;
+  padding-right: 4px;
 }
 
 .el-message-box .el-message-box__message {
   word-break: break-all;
+  overflow-y: auto;
+  max-height: 80vh;
 }
 
 #drag-resize-container {
   position: absolute;
   /*height: 100%;*/
   width: 10px;
-  right: -5px;
+  right: -12px;
   top: 0px;
 }
 #drag-resize-pointer {
   position: fixed;
   height: 100%;
-  width: 18px;
+  width: 10px;
   cursor: col-resize;
 }
 #drag-resize-pointer::after {
@@ -249,5 +235,9 @@ button, input, textarea, .vjs__tree {
 .dark-mode #drag-resize-pointer::after {
   border-left: 1px solid #b9b8b8;
   border-right: 1px solid #b9b8b8;
+}
+
+@keyframes rotate {
+  to{ transform: rotate(360deg); }
 }
 </style>

@@ -2,9 +2,9 @@
   <div>
     <div>
       <!-- add button -->
-      <el-form :inline="true" size="small">
+      <el-form :inline="true">
         <el-form-item>
-          <el-button size="small" type="primary" @click="showEditDialog({})">{{ $t('message.add_new_line') }}</el-button>
+          <el-button type="primary" @click="showEditDialog({})">{{ $t('message.add_new_line') }}</el-button>
         </el-form-item>
       </el-form>
 
@@ -12,7 +12,7 @@
       <el-dialog :title="dialogTitle" :visible.sync="editDialog" @open='openDialog' :close-on-click-modal='false'>
         <el-form>
           <el-form-item label="Value">
-            <FormatViewer ref='formatViewer' :content.sync='editLineItem.value'></FormatViewer>
+            <FormatViewer ref='formatViewer' :redisKey="redisKey" :dataMap="editLineItem" :content='editLineItem.value'></FormatViewer>
           </el-form-item>
         </el-form>
 
@@ -26,8 +26,8 @@
     <!-- content table -->
     <el-table
       stripe
-      size="small"
       border
+      size='mini'
       min-height=300
       :data="setData">
       <el-table-column
@@ -37,11 +37,14 @@
         width="150">
       </el-table-column>
       <el-table-column
-        prop="valueDisplay"
+        prop="value"
         resizable
         sortable
         show-overflow-tooltip
         label="Value">
+        <template slot-scope="scope">
+          {{ $util.cutString($util.bufToString(scope.row.value), 1000) }}
+        </template>
       </el-table-column>
 
       <el-table-column label="Operation">
@@ -54,8 +57,10 @@
           <i :class='loadingIcon'></i>
         </template>
         <template slot-scope="scope">
-          <el-button type="text" @click="showEditDialog(scope.row)" icon="el-icon-edit" circle></el-button>
-          <el-button type="text" @click="deleteLine(scope.row)" icon="el-icon-delete" circle></el-button>
+          <el-button type="text" @click="$util.copyToClipboard(scope.row.value)" icon="el-icon-document" :title="$t('message.copy')"></el-button>
+          <el-button type="text" @click="showEditDialog(scope.row)" icon="el-icon-edit" :title="$t('message.edit_line')"></el-button>
+          <el-button type="text" @click="deleteLine(scope.row)" icon="el-icon-delete" :title="$t('el.upload.delete')"></el-button>
+          <el-button type="text" @click="dumpCommand(scope.row)" icon="fa fa-code" :title="$t('message.dump_to_clipboard')"></el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -71,12 +76,15 @@
         {{ $t('message.load_more_keys') }}
       </el-button>
     </div>
+
+    <ScrollToTop></ScrollToTop>
   </div>
 </template>
 
 <script>
 import PaginationTable from '@/components/PaginationTable';
 import FormatViewer from '@/components/FormatViewer';
+import ScrollToTop from '@/components/ScrollToTop';
 
 export default {
   data() {
@@ -88,7 +96,7 @@ export default {
       beforeEditItem: {},
       editLineItem: {},
       loadingIcon: '',
-      pageSize: 30,
+      pageSize: 200,
       searchPageSize: 1000,
       oneTimeListLength: 0,
       scanStream: null,
@@ -96,7 +104,7 @@ export default {
     };
   },
   props: ['client', 'redisKey'],
-  components: {PaginationTable, FormatViewer},
+  components: {PaginationTable, FormatViewer, ScrollToTop},
   computed: {
     dialogTitle() {
       return this.beforeEditItem.value ? this.$t('message.edit_line') :
@@ -123,9 +131,11 @@ export default {
     initTotal() {
       this.client.scard(this.redisKey).then((reply) => {
         this.total = reply;
-      });
+      }).catch(e => {});
     },
     resetTable() {
+      // stop scanning first, #815
+      this.scanStream && this.scanStream.pause();
       this.setData = [];
       this.scanStream = null;
       this.oneTimeListLength = 0;
@@ -146,7 +156,8 @@ export default {
         for (const i of reply) {
           setData.push({
             value: i,
-            valueDisplay: this.$util.bufToString(i),
+            // valueDisplay: this.$util.bufToString(i),
+            uniq: Math.random(),
           });
         }
 
@@ -163,50 +174,76 @@ export default {
         this.loadingIcon = '';
         this.loadMoreDisable = true;
       });
+
+      this.scanStream.on('error', e => {
+        this.loadingIcon = '';
+        this.loadMoreDisable = true;
+        this.$message.error(e.message);
+      });
     },
     getScanMatch() {
       return this.filterValue ? `*${this.filterValue}*` : '*';
     },
     openDialog() {
-      this.$nextTick(() => {
-        this.$refs.formatViewer.autoFormat();
-      });
+      // this.$nextTick(() => {
+      //   this.$refs.formatViewer.autoFormat();
+      // });
     },
     showEditDialog(row) {
       this.editLineItem = row;
       this.beforeEditItem = this.$util.cloneObjWithBuff(row);
       this.editDialog = true;
+
+      this.rowUniq = row.uniq;
+    },
+    dumpCommand(item) {
+      const lines = item ? [item] : this.setData;
+      const params = lines.map(line => {
+        return this.$util.bufToQuotation(line.value);
+      });
+
+      const command = `SADD ${this.$util.bufToQuotation(this.redisKey)} ${params.join(' ')}`;
+      this.$util.copyToClipboard(command);
+      this.$message.success({message: this.$t('message.copy_success'), duration: 800});
     },
     editLine() {
       const key = this.redisKey;
       const client = this.client;
       const before = this.beforeEditItem;
-      const after = this.editLineItem;
+      const afterValue = this.$refs.formatViewer.getContent();
 
-      this.editDialog = false;
-
-      if (!after.value || (before.value && before.value.equals(after.value))) {
+      if (!afterValue) {
         return;
       }
 
+      // not changed
+      if (before.value && before.value.equals(afterValue)) {
+        return this.editDialog = false;
+      }
+
+      this.editDialog = false;
+
       client.sadd(
         key,
-        after.value
+        afterValue
       ).then((reply) => {
         // add success
         if (reply === 1) {
           // edit key remove previous value
           if (before.value) {
-            client.srem(
-              key,
-              before.value
-            ).then((reply) => {
-              this.initShow();
-            });
+            client.srem(key, before.value);
           }
 
+          // this.initShow(); // do not reinit, #786
+          const newLine = {value: afterValue, uniq: Math.random()};
+          // edit line
+          if (this.rowUniq) {
+            this.$util.listSplice(this.setData, this.rowUniq, newLine);
+          }
+          // new line
           else {
-            this.initShow();
+            this.setData.push(newLine);
+            this.total++;
           }
 
           this.$message.success({
@@ -222,7 +259,7 @@ export default {
             duration: 1000,
           });
         }
-      });
+      }).catch(e => {this.$message.error(e.message);});
     },
     deleteLine(row) {
       this.$confirm(
@@ -239,9 +276,11 @@ export default {
               duration: 1000,
             });
 
-            this.initShow();
+            // this.initShow(); // do not reinit, #786
+            this.$util.listSplice(this.setData, row.uniq);
+            this.total--;
           }
-        });
+        }).catch(e => {this.$message.error(e.message);});
       }).catch(() => {});
     },
   },

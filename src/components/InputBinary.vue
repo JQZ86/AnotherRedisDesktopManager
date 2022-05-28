@@ -1,13 +1,16 @@
 <template>
   <div>
-    <span v-if="!buffVisible" class='input-binary-tag'>[Hex]</span>
-    <el-input :value='contentDisplay' @change="updateContent($event)"></el-input>
+    <el-tag v-if="!buffVisible" class='input-binary-tag' size="mini">[Hex]</el-tag>
+    <el-input :disabled='disabled' :value='contentDisplay' @change="updateContent($event)"></el-input>
   </div>
 </template>
 
 <script type="text/javascript">
 export default {
-  props: ['content'],
+  props: {
+    content: {default: () => Buffer.from('')},
+    disabled: {type: Boolean, default: false},
+  },
   computed: {
     contentDisplay() {
       if (!this.content) {
@@ -35,8 +38,6 @@ export default {
 
 <style type="text/css">
   .input-binary-tag {
-    color: #7ab3ef;
     font-size: 80%;
-    /*float: left;*/
   }
 </style>

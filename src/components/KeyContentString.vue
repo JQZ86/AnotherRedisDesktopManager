@@ -4,22 +4,25 @@
   <el-form-item>
     <FormatViewer
       ref='formatViewer'
-      :content.sync='content'
+      :content='content'
       :binary='binary'
-      float=''
-      :textrows=12>
+      :redisKey='redisKey'
+      float=''>
     </FormatViewer>
   </el-form-item>
 
   <!-- save btn -->
   <el-form-item>
-    <el-button type="primary" @click="execSave">{{ $t('message.save') }}</el-button>
+    <el-button ref='saveBtn' type="primary" @click="execSave" title='Ctrl+s'>{{ $t('message.save') }}</el-button>
   </el-form-item>
+
+  <ScrollToTop parentNum='4'></ScrollToTop>
 </el-form>
 </template>
 
 <script>
 import FormatViewer from '@/components/FormatViewer';
+import ScrollToTop from '@/components/ScrollToTop';
 
 export default {
   data() {
@@ -28,23 +31,30 @@ export default {
       binary: false,
     };
   },
-  props: ['client', 'redisKey'],
-  components: { FormatViewer },
+  props: ['client', 'redisKey', 'hotKeyScope'],
+  components: { FormatViewer, ScrollToTop },
   methods: {
     initShow() {
       this.client.getBuffer(this.redisKey).then((reply) => {
         this.content = reply;
-        this.$refs.formatViewer.autoFormat();
+        // this.$refs.formatViewer.autoFormat();
       });
     },
     execSave() {
-      const key = this.redisKey;
+      const content = this.$refs.formatViewer.getContent();
+
+      // viewer check failed, do not save
+      if (content === false) {
+        return;
+      }
 
       this.client.set(
-        key,
-        this.content
+        this.redisKey,
+        content
       ).then((reply) => {
         if (reply === 'OK') {
+          // for compatibility, use expire instead of setex
+          this.setTTL();
           this.initShow()
 
           this.$message.success({
@@ -59,24 +69,54 @@ export default {
             duration: 1000,
           });
         }
+      }).catch(e => {
+        this.$message.error(e.message);
       });
+    },
+    setTTL () {
+      const ttl = parseInt(this.$parent.$parent.$refs.keyHeader.keyTTL);
+
+      if (ttl > 0) {
+        this.client.expire(this.redisKey, ttl).catch(e => {
+          this.$message.error('Expire Error: ' + e.message);
+        }).then(reply => {});
+      }
+    },
+    initShortcut() {
+      this.$shortcut.bind('ctrl+s, ⌘+s', this.hotKeyScope, () => {
+        // make input blur to fill the new value
+        // this.$refs.saveBtn.$el.focus();
+        this.execSave();
+
+        return false;
+      });
+    },
+    dumpCommand() {
+      const command = `SET ${this.$util.bufToQuotation(this.redisKey)} ` +
+                      this.$util.bufToQuotation(this.content);
+      this.$util.copyToClipboard(command);
+      this.$message.success({message: this.$t('message.copy_success'), duration: 800});
     },
   },
   mounted() {
     this.initShow();
+    this.initShortcut();
   },
 };
 </script>
 
 <style type="text/css">
-  .key-content-string .text-formated-container {
-    min-height: 252px;
-  }
-  .key-content-string .el-textarea textarea {
-    font-size: 14px;
+  .key-content-string .format-viewer-container {
+    min-height: calc(100vh - 253px);
   }
 
-  .key-content-string .format-viewer-container {
-    min-height: 296px;
+  /*text viewer box*/
+  .key-content-string .el-textarea textarea {
+    font-size: 14px;
+    height: calc(100vh - 286px);
+  }
+  /*json in monaco editor*/
+  .key-content-string .text-formated-container .monaco-editor-con {
+    height: calc(100vh - 330px);
   }
 </style>

@@ -13,16 +13,24 @@ export default {
 
     return buf.equals(Buffer.from(buf.toString()));
   },
-  bufToString(buf) {
-    if (typeof buf == 'string') {
+  bufToString(buf, forceHex = false) {
+    // if (typeof buf == 'string') {
+    //   return buf;
+    // }
+
+    if (!Buffer.isBuffer(buf)) {
       return buf;
     }
 
-    if (this.bufVisible(buf)) {
+    if (!forceHex && this.bufVisible(buf)) {
       return buf.toString();
     }
 
     return this.bufToHex(buf);
+  },
+  bufToQuotation(buf) {
+    const str = this.bufToString(buf).replaceAll('"', '\\"');
+    return `"${str}"`;
   },
   bufToHex(buf) {
     let result = buf.toJSON().data.map(item => {
@@ -49,6 +57,15 @@ export default {
 
     return Buffer.from(result, 'hex');
   },
+  bufToBinary(buf) {
+    let binary = '';
+
+    for (let item of buf) {
+        binary += item.toString(2).padStart(8, 0);
+    }
+
+    return binary;
+  },
   binaryStringToBuffer(str) {
     const groups = str.match(/[01]{8}/g);
     const numbers = groups.map(binary => parseInt(binary, 2))
@@ -67,6 +84,70 @@ export default {
       let obj = JSON.parse(string);
       return !!obj && typeof obj === 'object';
     } catch (e) {}
+
+    return false;
+  },
+  isPHPSerialize(str) {
+    const phpSerialize = require('php-serialize');
+
+    try {
+      phpSerialize.unserialize(str);
+      return true;
+    }catch (e) {}
+
+    return false;
+  },
+  isMsgpack(buf) {
+    const decode = require('@msgpack/msgpack').decode;
+
+    try {
+      const result = decode(buf);
+      if (['object', 'string'].includes(typeof result)) {
+        return true;
+      }
+    }
+    catch (e) {}
+
+    return false;
+  },
+  isBrotli(buf) {
+    return typeof this.zippedToString(buf, 'brotli') === 'string'
+  },
+  isGzip(buf) {
+    return typeof this.zippedToString(buf, 'gzip') === 'string';
+  },
+  isDeflate(buf) {
+    return typeof this.zippedToString(buf, 'deflate') === 'string';
+  },
+  isProtobuf(buf) {
+    const getData = require('rawproto').getData;
+
+    try {
+      getData(buf);
+      return true;
+    }
+    catch (e) {}
+
+    return false;
+  },
+  zippedToString(buf, type = 'unzip') {
+    const zlib   = require('zlib');
+    const funMap = {
+      // unzip will automatically detect Gzip or Deflate header
+      'unzip': 'unzipSync',
+      'gzip': 'gunzipSync',
+      'deflate': 'inflateSync',
+      'brotli': 'brotliDecompressSync',
+    };
+
+    try {
+      const decompressed = zlib[funMap[type]](buf);
+
+      if (Buffer.isBuffer(decompressed) && decompressed.length) {
+        return decompressed.toString();
+      }
+    }
+    catch (e) {}
 
     return false;
   },
@@ -94,7 +175,15 @@ export default {
 
     return clone;
   },
-  keysToTree(keys, separator = ':', openStatus = {}) {
+  keysToList(keys) {
+    return keys.map(key => {
+      return {
+        name: this.bufToString(key),
+        nameBuffer: key.toJSON(),
+      };
+    });
+  },
+  keysToTree(keys, separator = ':', openStatus = {}, forceCut = 20000) {
     let tree = {};
     keys.forEach(key => {
       let currentNode = tree;
@@ -119,18 +208,27 @@ export default {
       });
     });
 
-    return this.formatTreeData(tree, '', openStatus)
+    // to tree format
+    return this.formatTreeData(tree, '', openStatus, separator, forceCut);
   },
-  formatTreeData(tree, previousKey = '', openStatus = {}) {
+  formatTreeData(tree, previousKey = '', openStatus = {}, separator = ':', forceCut = 20000) {
     return Object.keys(tree).map(key => {
-      let node = { name: key};
+      let node = { name: key ? key : '[Empty]'};
 
+      // folder node
       if (!tree[key].keyNode && Object.keys(tree[key]).length > 0) {
-        let tillNowKeyName = previousKey + key;
+        let tillNowKeyName = previousKey + key + separator;
         node.open     = !!openStatus[tillNowKeyName];
-        node.children = this.formatTreeData(tree[key], tillNowKeyName, openStatus);
+        node.children = this.formatTreeData(tree[key], tillNowKeyName, openStatus, separator, forceCut);
         node.keyCount = node.children.reduce((a, b) => a + (b.keyCount || 0), 0);
+        // too many children, force cut, do not incluence keyCount display
+        node.open && node.children.length > forceCut && node.children.splice(forceCut);
+        // keep folder node in front of the tree and sorted(not include the outest list)
+        // async sort, only for opened folders
+        node.open && this.sortKeysAndFolder(node.children);
+        node.fullName = tillNowKeyName;
       }
+      // key node
       else {
         node.keyCount = 1;
         node.name = key.replace(/`k`$/, '');
@@ -139,5 +237,65 @@ export default {
 
       return node;
     });
-  }
+  },
+  // nodes is reference, keep folder in front and sorted,
+  // keep keys in tail and sorted
+  sortKeysAndFolder(nodes) {
+    nodes.sort(function(a, b) {
+      // a & b are all keys
+      if (!a.children && !b.children) {
+        return a.name > b.name ? 1 : -1;
+      }
+      // a & b are all folder
+      else if (a.children && b.children) {
+        return a.name > b.name ? 1 : -1;
+      }
+
+      // a is folder, b is key
+      else if (a.children) {
+        return -1;
+      }
+      // a is key, b is folder
+      else {
+        return 1;
+      }
+    });
+  },
+  copyToClipboard(text) {
+    const clipboard = require('electron').clipboard;
+    clipboard.writeText(text ? text.toString() : '');
+  },
+  debounce(func, wait, immediate = false, context = null) {
+    let timeout, result;
+
+    const debounced = function() {
+      const args = arguments;
+      timeout && clearTimeout(timeout);
+
+      const later = function() {
+        timeout = null;
+        if (!immediate) result = func.apply(context, args);
+      };
+
+      const callNow = immediate && !timeout;
+      timeout = setTimeout(later, wait);
+      if (callNow) result = func.apply(context, args);
+
+      return result;
+    }
+    debounced.cancel = function() {
+      clearTimeout(timeout);
+      timeout = null;
+    };
+
+    return debounced;
+  },
+  listSplice(lines, uniq, replacement = null) {
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].uniq === uniq) {
+        replacement ? lines.splice(i, 1, replacement) : lines.splice(i, 1);
+        break;
+      }
+    }
+  },
 };

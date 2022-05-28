@@ -11,6 +11,7 @@ function resolve (dir) {
 
 
 module.exports = {
+  mode: process.env.NODE_ENV === 'production' ? 'production' : 'development',
   context: path.resolve(__dirname, '../'),
   entry: {
     app: './src/main.js'
@@ -32,6 +33,20 @@ module.exports = {
   },
   module: {
     rules: [
+      {
+        test: /\.node$/,
+        loader: "node-loader",
+        options: {
+          // map sourceMap
+          name(resourcePath, resourceQuery) {
+            if (process.env.NODE_ENV === "development") {
+              return "[path][name].[ext]";
+            }
+
+            return "[contenthash].[ext]";
+          },
+        },
+      },
       {
         test: /\.vue$/,
         loader: 'vue-loader',
@@ -63,9 +78,12 @@ module.exports = {
         loader: 'url-loader',
         options: {
           limit: 10000,
-          name: utils.assetsPath('fonts/[name].[hash:7].[ext]')
+          name: utils.assetsPath('fonts/[name].[hash:7].[ext]'),
+          // this is vital important for fonts loads, added before 'static/fonts'
+          publicPath: '../../'
         }
-      }
+      },
+
     ]
   },
   node: {
